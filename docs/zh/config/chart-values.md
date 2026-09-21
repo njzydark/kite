@@ -24,6 +24,7 @@
 | `jwtSecret`            | 用于签名 JWT 令牌的密钥。为空时首次启动自动生成。         | `""`                                                 |
 | `encryptKey`           | 用于加密敏感数据的密钥。生产环境请修改此值。               | `"kite-default-encryption-key-change-in-production"` |
 | `host`                 | 应用程序的主机名                                           | `""`                                                 |
+| `serviceAccess.domain` | [服务访问](service-access.md)专用域名后缀；需要 HTTPS、通配 DNS/TLS 和单副本 | `""` |
 
 ## 数据库配置
 

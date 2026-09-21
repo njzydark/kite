@@ -41,4 +41,16 @@ spec:
                   number: {{ $.Values.service.port }}
           {{- end }}
     {{- end }}
+    {{- if .Values.serviceAccess.domain }}
+    - host: {{ printf "*.%s" .Values.serviceAccess.domain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "kite.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+    {{- end }}
 {{- end }}

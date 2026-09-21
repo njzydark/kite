@@ -26,8 +26,9 @@ type bootstrapAuthOptions struct {
 }
 
 type bootstrapCapabilities struct {
-	AIEnabled      bool `json:"aiEnabled"`
-	KubectlEnabled bool `json:"kubectlEnabled"`
+	ServiceAccessEnabled bool `json:"serviceAccessEnabled"`
+	AIEnabled            bool `json:"aiEnabled"`
+	KubectlEnabled       bool `json:"kubectlEnabled"`
 }
 
 type bootstrapResponse struct {
@@ -63,8 +64,9 @@ func (h *AuthHandler) Bootstrap(c *gin.Context) {
 		Setup: setup,
 		Auth:  h.bootstrapAuth(setting),
 		Capabilities: bootstrapCapabilities{
-			AIEnabled:      setting.AIAgentEnabled && strings.TrimSpace(string(setting.AIAPIKey)) != "",
-			KubectlEnabled: setting.KubectlEnabled,
+			ServiceAccessEnabled: common.ServiceAccessDomain != "" && !common.AnonymousUserEnabled,
+			AIEnabled:            setting.AIAgentEnabled && strings.TrimSpace(string(setting.AIAPIKey)) != "",
+			KubectlEnabled:       setting.KubectlEnabled,
 		},
 		User:                       user,
 		HasGlobalSidebarPreference: globalSidebarPreference != "",

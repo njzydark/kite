@@ -789,7 +789,8 @@
       "update": "更新",
       "delete": "删除",
       "log": "查看日志",
-      "exec": "执行"
+      "exec": "执行",
+      "portforward": "访问服务"
     }
   },
   "settings": {
@@ -1433,5 +1434,17 @@
     "placeholders": {
       "selectChart": "选择 Chart..."
     }
+  },
+  "serviceAccess": {
+    "title": "访问服务",
+    "description": "使用 Kite 权限打开服务；如服务有自己的登录，请在服务页面继续登录。",
+    "protocol": "服务协议",
+    "path": "起始路径",
+    "open": "打开服务",
+    "close": "关闭访问",
+    "expires": "{{time}} 到期",
+    "lifetime": "30 分钟无请求或访问满 8 小时后自动关闭。需要 get 和 portforward 权限。",
+    "popupBlocked": "请允许 Kite 弹出新窗口以打开服务。",
+    "failed": "无法管理服务访问。"
   }
 }

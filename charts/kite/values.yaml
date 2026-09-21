@@ -39,6 +39,13 @@ debug: false
 # Example: https://kite.zzde.me
 host: ""
 
+# Authenticated web access to Service/Pod ports. Uses host, or infers HTTPS HOST
+# from a single enabled ingress host. Requires wildcard DNS/TLS, one replica,
+# and anonymousUserEnabled=false. Empty disables it.
+serviceAccess:
+  domain: "" # e.g. access.example.com (without *.); distinct from the Kite host
+
+
 # Base path for the application
 # If you are serving kite under a subpath, set this value accordingly.
 # Remember to also set the ingress path to match.

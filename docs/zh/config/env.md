@@ -24,3 +24,5 @@ Kite 默认支持一些环境变量，来改变一些配置项的默认值。
 - **ENABLE_ANALYTICS**：启用数据分析功能，默认值为 `false`。当启用后，Kite 将收集有限数据以帮助改进产品。
 
 - **PORT**：Kite 运行的端口，默认值为 `8080`。
+
+- **SERVICE_ACCESS_DOMAIN**: Service/Pod 网页访问的可选域名后缀，例如 `access.example.com`（不包含 `*.`）。需要 HTTPS `HOST`、通配 DNS/TLS、单副本 Kite，并关闭匿名访问。参见[服务访问](service-access.md)。

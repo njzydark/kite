@@ -25,11 +25,12 @@ const (
 )
 
 var (
-	Port            = "8080"
-	JwtSecret       = DefaultJWTSecret
-	EnableAnalytics = false
-	Host            = ""
-	Base            = ""
+	Port                = "8080"
+	JwtSecret           = DefaultJWTSecret
+	EnableAnalytics     = false
+	Host                = ""
+	ServiceAccessDomain = ""
+	Base                = ""
 
 	NodeTerminalImage    = "busybox:latest"
 	KubectlTerminalImage = "zzde/kubectl:latest"
@@ -147,6 +148,7 @@ func LoadEnvs() {
 		AnonymousUserEnabled = true
 		klog.Warningf("Anonymous user is enabled, this is not secure for production!")
 	}
+	ServiceAccessDomain = strings.TrimSpace(os.Getenv("SERVICE_ACCESS_DOMAIN"))
 	if v := os.Getenv("HOST"); v != "" {
 		Host = v
 	}

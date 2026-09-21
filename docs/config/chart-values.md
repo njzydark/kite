@@ -24,6 +24,7 @@ This document describes all available configuration options for the Kite Helm Ch
 | `jwtSecret`            | Secret key for signing JWT tokens. Auto-generated on first boot if empty.                | `""`                                                 |
 | `encryptKey`           | Secret key used for encrypting sensitive data. Change this in production.                | `"kite-default-encryption-key-change-in-production"` |
 | `host`                 | Hostname for the application                                                             | `""`                                                 |
+| `serviceAccess.domain` | Dedicated DNS suffix for [service access](service-access.md); requires HTTPS, wildcard DNS/TLS and one replica | `""` |
 
 ## Database Configuration
 

@@ -9,6 +9,7 @@ export interface BootstrapSetup {
 }
 
 export interface BootstrapCapabilities {
+  serviceAccessEnabled?: boolean
   aiEnabled: boolean
   kubectlEnabled: boolean
 }

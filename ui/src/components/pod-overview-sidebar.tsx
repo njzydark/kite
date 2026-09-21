@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { IconBox, IconExternalLink } from '@tabler/icons-react'
+import { IconBox } from '@tabler/icons-react'
 import { Event as KubernetesEvent, Pod } from 'kubernetes-types/core/v1'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { ResourceIframeDialogContent } from '@/components/resource-iframe-dialog-content'
+import { ServiceAccess } from '@/components/service-access'
 
 type TranslationFn = ReturnType<typeof useTranslation>['t']
 
@@ -220,17 +221,18 @@ function PodPortsCard({
               key={`${containerName}-${port.name || 'port'}-${port.containerPort}-${port.protocol}-${index}`}
               className="flex min-w-0 items-center gap-3 px-4 py-2.5 text-sm"
             >
-              <a
-                href={withSubPath(
+              <ServiceAccess
+                namespace={namespace}
+                kind="pods"
+                name={name}
+                port={port.containerPort}
+                protocol={port.protocol}
+                legacyHref={withSubPath(
                   `${API_BASE_URL}${withCurrentClusterPath(`/namespaces/${namespace}/pods/${name}:${port.containerPort}/proxy/`)}`
                 )}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="app-link inline-flex min-w-0 items-center gap-1 font-mono tabular-nums"
               >
-                <span className="truncate">{port.containerPort}</span>
-                <IconExternalLink className="size-3 shrink-0" />
-              </a>
+                {port.containerPort}
+              </ServiceAccess>
               <span className="text-xs text-muted-foreground">
                 {port.protocol || 'TCP'}
               </span>

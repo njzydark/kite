@@ -19,6 +19,7 @@ import (
 	"github.com/zxh326/kite/pkg/rbac"
 	"github.com/zxh326/kite/pkg/resources"
 	"github.com/zxh326/kite/pkg/search"
+	"github.com/zxh326/kite/pkg/serviceaccess"
 	"github.com/zxh326/kite/pkg/settings"
 	"github.com/zxh326/kite/pkg/system"
 	"github.com/zxh326/kite/pkg/templates"
@@ -28,7 +29,7 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager) {
+func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager, access *serviceaccess.Server) {
 	authHandler := auth.NewAuthHandler()
 	helmChartsHandler := helm.NewHelmChartHandler()
 
@@ -41,6 +42,10 @@ func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager) {
 	registerUserRoutes(r, authHandler)
 	registerAdminRoutes(r, authHandler, cm, helmChartsHandler)
 	registerProtectedRoutes(r, authHandler, cm, helmChartsHandler)
+	accessAPI := r.Group("/api/v1/_clusters/:cluster/service-access/sessions", authHandler.RequireAuth(), middleware.ClusterMiddleware(cm))
+	accessAPI.POST("", access.Create)
+	accessAPI.GET("", access.List)
+	accessAPI.DELETE("/:id", access.Delete)
 }
 
 func registerBaseRoutes(r *gin.RouterGroup) {

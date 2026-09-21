@@ -779,7 +779,8 @@
       "update": "Update",
       "delete": "Delete",
       "log": "View Logs",
-      "exec": "Execute"
+      "exec": "Execute",
+      "portforward": "Access services"
     }
   },
   "settings": {
@@ -1346,5 +1347,17 @@
     "placeholders": {
       "selectChart": "Select a chart..."
     }
+  },
+  "serviceAccess": {
+    "title": "Access service",
+    "description": "Open the service using your Kite access. Sign in to the service separately if required.",
+    "protocol": "Service protocol",
+    "path": "Start path",
+    "open": "Open service",
+    "close": "Close access",
+    "expires": "Expires at {{time}}",
+    "lifetime": "Access closes after 30 minutes without requests, or after 8 hours. Requires get and portforward permissions.",
+    "popupBlocked": "Allow pop-ups for Kite to open the service.",
+    "failed": "Unable to manage service access."
   }
 }

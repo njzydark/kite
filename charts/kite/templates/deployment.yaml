@@ -1,3 +1,18 @@
+{{- $accessHost := .Values.host }}
+{{- if .Values.serviceAccess.domain }}
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "serviceAccess requires replicaCount=1 (sessions are stored in memory)" }}
+{{- end }}
+{{- if .Values.anonymousUserEnabled }}
+{{- fail "serviceAccess requires anonymousUserEnabled=false" }}
+{{- end }}
+{{- if and (not $accessHost) .Values.ingress.enabled (eq (len .Values.ingress.hosts) 1) }}
+{{- $accessHost = printf "https://%s" (first .Values.ingress.hosts).host }}
+{{- end }}
+{{- if not (hasPrefix "https://" $accessHost) }}
+{{- fail "serviceAccess requires an HTTPS host or one enabled ingress host" }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,9 +70,13 @@ spec:
             - secretRef:
                 name: {{ include "kite.secret" . }}
           env:
-            {{- if .Values.host }}
+            {{- if .Values.serviceAccess.domain }}
+            - name: SERVICE_ACCESS_DOMAIN
+              value: {{ .Values.serviceAccess.domain | quote }}
+            {{- end }}
+            {{- if $accessHost }}
             - name: HOST
-              value: {{ .Values.host }}
+              value: {{ $accessHost | quote }}
             {{- end }}
             {{- if .Values.anonymousUserEnabled }}
             - name: ANONYMOUS_USER_ENABLED

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ import (
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
 	"github.com/zxh326/kite/pkg/scheduler"
+	"github.com/zxh326/kite/pkg/serviceaccess"
 	"github.com/zxh326/kite/pkg/templates"
 	"k8s.io/klog/v2"
 )
@@ -47,7 +49,11 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 	return cm, nil
 }
 
-func buildEngine(cm *cluster.ClusterManager) *gin.Engine {
+func buildEngine(ctx context.Context, cm *cluster.ClusterManager) http.Handler {
+	access, err := serviceaccess.New(ctx, cm)
+	if err != nil {
+		klog.Fatalf("Invalid service access configuration: %v", err)
+	}
 	r := gin.New()
 	middleware.ConfigureRawPathRouting(r)
 	configureTrustedProxies(r)
@@ -61,10 +67,10 @@ func buildEngine(cm *cluster.ClusterManager) *gin.Engine {
 	r.Use(middleware.DevCORS(common.CORSAllowedOrigins))
 
 	base := r.Group(common.Base)
-	setupAPIRouter(base, cm)
+	setupAPIRouter(base, cm, access)
 	setupStatic(r)
 
-	return r
+	return access.Wrap(r)
 }
 
 func configureTrustedProxies(r *gin.Engine) {

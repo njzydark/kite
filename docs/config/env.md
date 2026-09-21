@@ -24,3 +24,5 @@ Kite supports several environment variables by default to change the default val
 - **ENABLE_ANALYTICS**: Enable data analytics functionality, default value is `false`. When enabled, Kite will collect limited data to help improve the product.
 
 - **PORT**: Port on which Kite runs, default value is `8080`.
+
+- **SERVICE_ACCESS_DOMAIN**: Optional DNS suffix for authenticated Service/Pod web access (for example `access.example.com`, without `*.`). Requires an HTTPS `HOST`, wildcard DNS/TLS, one Kite replica, and anonymous access disabled. See [Service access](service-access.md).

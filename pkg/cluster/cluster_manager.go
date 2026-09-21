@@ -22,6 +22,7 @@ import (
 )
 
 type ClientSet struct {
+	InCluster  bool
 	Name       string
 	Version    string // Kubernetes version
 	K8sClient  *kube.K8sClient
@@ -50,7 +51,11 @@ func createClientSetInCluster(name, prometheusURL string) (*ClientSet, error) {
 		return nil, err
 	}
 
-	return newClientSet(name, config, prometheusURL)
+	cs, err := newClientSet(name, config, prometheusURL)
+	if cs != nil {
+		cs.InCluster = true
+	}
+	return cs, err
 }
 
 func createClientSetFromConfig(name, content, prometheusURL string) (*ClientSet, error) {

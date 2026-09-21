@@ -1,5 +1,4 @@
 import { useMemo, type ReactNode } from 'react'
-import { IconExternalLink } from '@tabler/icons-react'
 import {
   Endpoints,
   Event as KubernetesEvent,
@@ -20,6 +19,7 @@ import { formatDate } from '@/lib/utils'
 import { useOwnerInfo } from '@/hooks/use-owner-info'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ServiceAccess } from '@/components/service-access'
 import { Column, SimpleTable } from '@/components/simple-table'
 import {
   WorkloadInfoBlock,
@@ -336,20 +336,19 @@ function ServicePorts({
           key={`${port.name || index}-${port.port}-${port.protocol}`}
           className="grid min-w-0 grid-cols-[minmax(0,1fr)_5rem_5rem] items-center gap-2 py-2 text-sm"
         >
-          <a
-            href={withSubPath(
+          <ServiceAccess
+            namespace={namespace}
+            kind="services"
+            name={name}
+            port={port.port}
+            protocol={port.protocol}
+            legacyHref={withSubPath(
               `${API_BASE_URL}${withCurrentClusterPath(`/namespaces/${namespace}/services/${name}:${port.port}/proxy/`)}`
             )}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="app-link inline-flex min-w-0 items-center gap-1 font-mono"
           >
-            <span className="truncate">
-              {port.name ? `${port.name}:` : ''}
-              {port.port}
-            </span>
-            <IconExternalLink className="size-3 shrink-0" />
-          </a>
+            {port.name ? `${port.name}:` : ''}
+            {port.port}
+          </ServiceAccess>
           <span className="text-center text-xs text-muted-foreground">
             {port.protocol || 'TCP'}
           </span>

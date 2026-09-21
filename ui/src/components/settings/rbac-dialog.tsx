@@ -66,6 +66,7 @@ const VERB_SUGGESTIONS = [
   'delete',
   'log',
   'exec',
+  'portforward',
 ]
 
 function ListEditor({
@@ -328,7 +329,7 @@ export function RBACDialog({
                 onChange={(items) => setArrayField('verbs', items)}
                 input={drafts.verbs}
                 onInputChange={(value) => setDraft('verbs', value)}
-                placeholder="* or get,create,update,delete,log,exec"
+                placeholder="* or get,create,update,delete,log,exec,portforward"
                 suggestions={VERB_SUGGESTIONS}
               />
             </div>
