@@ -19,15 +19,16 @@ import (
 	"github.com/zxh326/kite/pkg/common"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
+	"gorm.io/gorm"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
-	cookieName      = "__Host-kite_service_session"
-	exchangePath    = "/.kite/access"
-	idleTimeout     = 30 * time.Minute
-	sessionLifetime = 8 * time.Hour
-	maxSessions     = 1024
+	cookieName           = "__Host-kite_service_session"
+	exchangePath         = "/.kite/access"
+	defaultAccessMinutes = 3 * 60
+	maxAccessMinutes     = 365 * 24 * 60
+	maxSessions          = 1024
 )
 
 type Target struct {
@@ -47,13 +48,13 @@ type session struct {
 	Target
 	Cluster       string    `json:"cluster"`
 	ExpiresAt     time.Time `json:"expiresAt"`
+	public        bool
 	userID        uint
 	uid           string
-	secret        [32]byte
+	secrets       [][32]byte
 	ticket        [32]byte
 	ticketExpires time.Time
 	ticketPath    string
-	lastUsed      time.Time
 	transport     *http.Transport
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -103,7 +104,7 @@ func (s *Server) run(ctx context.Context) {
 		case now := <-ticker.C:
 			s.mu.Lock()
 			for id, item := range s.sessions {
-				if now.After(item.ExpiresAt) || now.Sub(item.lastUsed) > idleTimeout {
+				if expired(item.ExpiresAt, now) {
 					s.removeLocked(id)
 				}
 			}
@@ -126,17 +127,16 @@ func randomToken() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *Server) newSessionID(target Target) string {
+func (s *Server) defaultAlias(target Target) string {
 	name := strings.ReplaceAll(target.Name, ".", "-")
 	port := "-" + strconv.Itoa(target.Port)
 	labelLimit := min(63, 253-1-len(s.domain))
-	name = strings.TrimRight(name[:min(len(name), labelLimit-len(port)-1-12)], "-")
-	for {
-		id := name + port + "-" + randomToken()[:12]
-		if _, exists := s.sessions[id]; !exists {
-			return id
-		}
-	}
+	name = strings.TrimRight(name[:min(len(name), labelLimit-len(port))], "-")
+	return name + port
+}
+
+func (s *Server) validAlias(alias string) bool {
+	return len(alias) <= min(63, 253-1-len(s.domain)) && len(validation.IsDNS1123Label(alias)) == 0
 }
 
 func allowed(user model.User, clusterName string, target Target) bool {
@@ -145,116 +145,434 @@ func allowed(user model.User, clusterName string, target Target) bool {
 		rbac.CanAccessCurrent(user, target.Kind, string(common.VerbPortForward), clusterName, target.Namespace)
 }
 
-func (s *Server) Create(c *gin.Context) {
+func expired(at time.Time, now time.Time) bool {
+	return !at.IsZero() && !now.Before(at)
+}
+
+func accessExpiry(minutes int, now time.Time) time.Time {
+	if minutes == 0 {
+		return time.Time{}
+	}
+	return now.Add(time.Duration(minutes) * time.Minute)
+}
+
+func publicExpired(entry model.ServiceAccess, now time.Time) bool {
+	return entry.Public && entry.ExpiresInMinutes > 0 && (entry.PublicUntil == nil || !now.Before(*entry.PublicUntil))
+}
+
+func samePublicUntil(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+func isAdmin(user model.User) bool {
+	user.Roles = nil
+	return rbac.UserHasRole(user, model.DefaultAdminRole.Name)
+}
+
+func setPublicUntil(entry *model.ServiceAccess, now time.Time) {
+	entry.PublicUntil = nil
+	if entry.Public && entry.ExpiresInMinutes > 0 {
+		until := accessExpiry(entry.ExpiresInMinutes, now)
+		entry.PublicUntil = &until
+	}
+}
+
+type createRequest struct {
+	Target
+	Path             string `json:"path"`
+	Alias            string `json:"alias"`
+	ExpiresInMinutes *int   `json:"expiresInMinutes"`
+	Public           *bool  `json:"public"`
+}
+
+func (s *Server) prepareCreate(c *gin.Context) (createRequest, model.User, *cluster.ClientSet, bool) {
+	var request createRequest
+	var user model.User
 	if s.domain == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "service access is not configured"})
-		return
+		return request, user, nil, false
 	}
 	if c.GetHeader("Origin") != s.origin {
 		c.JSON(http.StatusForbidden, gin.H{"error": "invalid origin"})
-		return
-	}
-	var request struct {
-		Target
-		Path string `json:"path"`
+		return request, user, nil, false
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service access request"})
-		return
+		return request, user, nil, false
 	}
-	target := request.Target
 	if request.Path == "" {
 		request.Path = "/"
 	}
 	parsed, pathErr := url.ParseRequestURI(request.Path)
 	if pathErr != nil || parsed.IsAbs() || !strings.HasPrefix(request.Path, "/") || strings.HasPrefix(request.Path, "//") || strings.ContainsAny(request.Path, "\\\r\n") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "start path must be a local path beginning with /"})
-		return
+		return request, user, nil, false
 	}
-	if target.Scheme == "" {
-		target.Scheme = "http"
+	if request.Scheme == "" {
+		request.Scheme = "http"
 	}
-	if !target.valid() {
+	if !request.valid() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target; select a namespace, TCP port, and HTTP or HTTPS"})
-		return
+		return request, user, nil, false
 	}
-	user := c.MustGet("user").(model.User)
+	if request.Alias == "" {
+		request.Alias = s.defaultAlias(request.Target)
+	}
+	if !s.validAlias(request.Alias) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hostname; use a single DNS label"})
+		return request, user, nil, false
+	}
+	if request.ExpiresInMinutes != nil && (*request.ExpiresInMinutes < 0 || *request.ExpiresInMinutes > maxAccessMinutes) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expiration must be between 0 and 525600 minutes"})
+		return request, user, nil, false
+	}
+	user = c.MustGet("user").(model.User)
+	if request.Public != nil && *request.Public && !isAdmin(user) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only administrators can publish a service"})
+		return request, user, nil, false
+	}
 	cs := c.MustGet("cluster").(*cluster.ClientSet)
-	if !allowed(user, cs.Name, target) {
+	if !allowed(user, cs.Name, request.Target) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "get and portforward permissions are required"})
+		return request, user, nil, false
+	}
+	checkCtx, cancelCheck := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	_, checkErr := resolve(checkCtx, cs, request.Target, "")
+	cancelCheck()
+	if checkErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": checkErr.Error()})
+		return request, user, nil, false
+	}
+	return request, user, cs, true
+}
+
+func (s *Server) Create(c *gin.Context) {
+	request, user, cs, ok := s.prepareCreate(c)
+	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
-	defer cancel()
-	resolved, err := resolve(ctx, cs, target, "")
+	target := request.Target
+	s.mu.Lock()
+	var entry model.ServiceAccess
+	created := false
+	err := model.DB.Where("user_id = ? AND cluster = ? AND namespace = ? AND kind = ? AND name = ? AND port = ?", user.ID, cs.Name, target.Namespace, target.Kind, target.Name, target.Port).First(&entry).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		minutes := defaultAccessMinutes
+		if request.ExpiresInMinutes != nil {
+			minutes = *request.ExpiresInMinutes
+		}
+		entry = model.ServiceAccess{ID: request.Alias, UserID: user.ID, Cluster: cs.Name, Namespace: target.Namespace, Kind: target.Kind, Name: target.Name, Port: target.Port, Scheme: target.Scheme, Path: request.Path, ExpiresInMinutes: minutes}
+		if request.Public != nil {
+			entry.Public = *request.Public
+		}
+		setPublicUntil(&entry, time.Now())
+		if err := model.DB.Create(&entry).Error; err != nil {
+			s.mu.Unlock()
+			c.JSON(http.StatusConflict, gin.H{"error": "hostname already in use; choose another alias"})
+			return
+		}
+		created = true
+	} else if err != nil {
+		s.mu.Unlock()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to load service access"})
+		return
+	}
+	minutes := entry.ExpiresInMinutes
+	if request.ExpiresInMinutes != nil {
+		minutes = *request.ExpiresInMinutes
+	}
+	public := entry.Public
+	if request.Public != nil {
+		public = *request.Public
+	}
+	if public && !isAdmin(user) {
+		s.mu.Unlock()
+		c.JSON(http.StatusForbidden, gin.H{"error": "only administrators can publish a service"})
+		return
+	}
+	if !created && (entry.Scheme != target.Scheme || entry.Path != request.Path || entry.ExpiresInMinutes != minutes || entry.Public != public || public) {
+		entry.Scheme, entry.Path = target.Scheme, request.Path
+		entry.ExpiresInMinutes, entry.Public = minutes, public
+		setPublicUntil(&entry, time.Now())
+		if err := model.DB.Save(&entry).Error; err != nil {
+			s.mu.Unlock()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to update service access"})
+			return
+		}
+		s.removeLocked(entry.ID)
+	}
+	s.mu.Unlock()
+	if entry.Public {
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusCreated, gin.H{"id": entry.ID, "url": s.publicURL(entry), "hostname": "https://" + entry.ID + "." + s.domain, "expiresAt": entry.PublicUntil})
+		return
+	}
+	item, ticket, err := s.issue(c.Request.Context(), cs, user, entry)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	now := time.Now()
+	s.mu.Lock()
+	expiresAt := expiryJSON(item.ExpiresAt)
+	s.mu.Unlock()
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, gin.H{"id": item.ID, "url": s.ticketURL(item.ID, ticket), "hostname": "https://" + item.ID + "." + s.domain, "expiresAt": expiresAt})
+}
+
+func expiryJSON(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+	return &at
+}
+
+func (s *Server) ticketURL(id, ticket string) string {
+	return "https://" + id + "." + s.domain + exchangePath + "#" + ticket
+}
+
+func (s *Server) publicURL(entry model.ServiceAccess) string {
+	return "https://" + entry.ID + "." + s.domain + entry.Path
+}
+
+func (s *Server) issue(ctx context.Context, cs *cluster.ClientSet, user model.User, entry model.ServiceAccess) (*session, string, error) {
+	target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelResolve()
+	resolved, err := resolve(resolveCtx, cs, target, "")
+	if err != nil {
+		return nil, "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var item *session
-	for id, candidate := range s.sessions {
-		if now.After(candidate.ExpiresAt) || now.Sub(candidate.lastUsed) > idleTimeout {
-			s.removeLocked(id)
-			continue
-		}
-		if candidate.userID == user.ID && candidate.Cluster == cs.Name && candidate.Target == target && candidate.uid == resolved.uid {
-			item = candidate
-		}
+	var current model.ServiceAccess
+	if err := model.DB.Where("id = ? AND user_id = ?", entry.ID, user.ID).First(&current).Error; err != nil || current.Cluster != entry.Cluster || current.Namespace != entry.Namespace || current.Kind != entry.Kind || current.Name != entry.Name || current.Port != entry.Port || current.Scheme != entry.Scheme || current.Path != entry.Path || current.ExpiresInMinutes != entry.ExpiresInMinutes || current.Public != entry.Public || !samePublicUntil(current.PublicUntil, entry.PublicUntil) {
+		return nil, "", errors.New("service access configuration changed; open it again")
+	}
+	if publicExpired(current, time.Now()) {
+		return nil, "", errors.New("public service access has expired")
+	}
+	now := time.Now()
+	item := s.sessions[entry.ID]
+	if item != nil && (expired(item.ExpiresAt, now) || item.uid != resolved.uid || item.public != entry.Public) {
+		s.removeLocked(entry.ID)
+		item = nil
 	}
 	if item == nil {
 		if len(s.sessions) >= maxSessions {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many service access sessions"})
-			return
+			return nil, "", errors.New("too many service access sessions")
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		item = &session{ID: s.newSessionID(target), Target: target, Cluster: cs.Name, userID: user.ID, uid: resolved.uid, ExpiresAt: now.Add(sessionLifetime), ctx: ctx, cancel: cancel}
+		lifetime, cancel := context.WithCancel(context.Background())
+		item = &session{ID: entry.ID, Target: target, Cluster: cs.Name, userID: user.ID, uid: resolved.uid, public: entry.Public, ctx: lifetime, cancel: cancel}
 		item.transport = s.newTransport(item)
 		s.sessions[item.ID] = item
 	}
+	if entry.Public {
+		if entry.PublicUntil != nil {
+			item.ExpiresAt = *entry.PublicUntil
+		} else {
+			item.ExpiresAt = time.Time{}
+		}
+		return item, "", nil
+	}
+	item.ExpiresAt = accessExpiry(entry.ExpiresInMinutes, now)
 	ticket := randomToken()
 	item.ticket = sha256.Sum256([]byte(ticket))
 	item.ticketExpires = now.Add(time.Minute)
-	item.ticketPath = request.Path
-	item.lastUsed = now
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, gin.H{"id": item.ID, "url": "https://" + item.ID + "." + s.domain + exchangePath + "#" + ticket, "expiresAt": item.ExpiresAt})
+	item.ticketPath = entry.Path
+	return item, ticket, nil
 }
 
 func (s *Server) List(c *gin.Context) {
+	s.list(c, true)
+}
+
+func (s *Server) ListAll(c *gin.Context) {
+	s.list(c, false)
+}
+
+func (s *Server) list(c *gin.Context, currentClusterOnly bool) {
 	user := c.MustGet("user").(model.User)
-	cs := c.MustGet("cluster").(*cluster.ClientSet)
+	query := model.DB.Where("user_id = ?", user.ID)
+	if currentClusterOnly {
+		query = query.Where("cluster = ?", c.MustGet("cluster").(*cluster.ClientSet).Name)
+	}
+	var entries []model.ServiceAccess
+	if err := query.Order("cluster, namespace, name, port").Find(&entries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to list service access"})
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	items := make([]session, 0)
+	items := make([]gin.H, 0, len(entries))
 	now := time.Now()
-	for _, item := range s.sessions {
-		if item.userID == user.ID && item.Cluster == cs.Name && now.Before(item.ExpiresAt) && now.Sub(item.lastUsed) <= idleTimeout && allowed(user, item.Cluster, item.Target) {
-			items = append(items, session{ID: item.ID, Target: item.Target, Cluster: item.Cluster, ExpiresAt: item.ExpiresAt})
+	for _, entry := range entries {
+		target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
+		_, clusterErr := s.cm.GetClientSet(entry.Cluster)
+		authorized := clusterErr == nil && allowed(user, entry.Cluster, target) && (!entry.Public || isAdmin(user))
+		item := s.sessions[entry.ID]
+		var expiresAt *time.Time
+		if item != nil && !expired(item.ExpiresAt, now) {
+			expiresAt = expiryJSON(item.ExpiresAt)
 		}
+		items = append(items, gin.H{"id": entry.ID, "cluster": entry.Cluster, "namespace": entry.Namespace, "kind": entry.Kind, "name": entry.Name, "port": entry.Port, "scheme": entry.Scheme, "path": entry.Path, "hostname": "https://" + entry.ID + "." + s.domain, "expiresAt": expiresAt, "expiresInMinutes": entry.ExpiresInMinutes, "public": entry.Public, "publicUntil": entry.PublicUntil, "authorized": authorized})
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, items)
 }
 
 func (s *Server) Delete(c *gin.Context) {
+	s.delete(c, true)
+}
+
+func (s *Server) DeleteAny(c *gin.Context) {
+	s.delete(c, false)
+}
+
+func (s *Server) Update(c *gin.Context) {
+	if c.GetHeader("Origin") != s.origin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid origin"})
+		return
+	}
+	var request struct {
+		ExpiresInMinutes *int  `json:"expiresInMinutes"`
+		Public           *bool `json:"public"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.ExpiresInMinutes == nil || request.Public == nil || *request.ExpiresInMinutes < 0 || *request.ExpiresInMinutes > maxAccessMinutes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provide public and an expiration between 0 and 525600 minutes"})
+		return
+	}
+	user := c.MustGet("user").(model.User)
+	var entry model.ServiceAccess
+	if err := model.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&entry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
+		return
+	}
+	if *request.Public {
+		target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
+		if !isAdmin(user) || !allowed(user, entry.Cluster, target) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "administrator and resource permissions are required to publish a service"})
+			return
+		}
+		cs, err := s.cm.GetClientSet(entry.Cluster)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+		_, err = resolve(checkCtx, cs, target, "")
+		cancel()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := model.DB.Where("id = ? AND user_id = ?", entry.ID, user.ID).First(&entry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
+		return
+	}
+	if entry.ExpiresInMinutes == *request.ExpiresInMinutes && entry.Public == *request.Public {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	entry.ExpiresInMinutes, entry.Public = *request.ExpiresInMinutes, *request.Public
+	setPublicUntil(&entry, time.Now())
+	if err := model.DB.Save(&entry).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to update service access"})
+		return
+	}
+	s.removeLocked(entry.ID)
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) delete(c *gin.Context, currentClusterOnly bool) {
 	if c.GetHeader("Origin") != s.origin {
 		c.JSON(http.StatusForbidden, gin.H{"error": "invalid origin"})
 		return
 	}
 	user := c.MustGet("user").(model.User)
-	cs := c.MustGet("cluster").(*cluster.ClientSet)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	item := s.sessions[c.Param("id")]
-	if item == nil || item.userID != user.ID || item.Cluster != cs.Name {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+	var entry model.ServiceAccess
+	if err := model.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&entry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
 		return
 	}
-	s.removeLocked(item.ID)
+	if currentClusterOnly && entry.Cluster != c.MustGet("cluster").(*cluster.ClientSet).Name {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := model.DB.Delete(&entry).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to delete service access"})
+		return
+	}
+	s.removeLocked(entry.ID)
 	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) Open(c *gin.Context) {
+	if s.domain == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "service access is not configured"})
+		return
+	}
+	user := c.MustGet("user").(model.User)
+	var entry model.ServiceAccess
+	if err := model.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&entry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
+		return
+	}
+	target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
+	if !allowed(user, entry.Cluster, target) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "get and portforward permissions are required"})
+		return
+	}
+	cs, err := s.cm.GetClientSet(entry.Cluster)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		return
+	}
+	if entry.Public {
+		if !isAdmin(user) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only administrators can renew public access"})
+			return
+		}
+		if publicExpired(entry, time.Now()) {
+			s.mu.Lock()
+			if err := model.DB.Where("id = ? AND user_id = ?", entry.ID, user.ID).First(&entry).Error; err != nil || !entry.Public {
+				s.mu.Unlock()
+				c.JSON(http.StatusNotFound, gin.H{"error": "public service access not found"})
+				return
+			}
+			if !publicExpired(entry, time.Now()) {
+				s.mu.Unlock()
+				c.Header("Cache-Control", "no-store")
+				c.Redirect(http.StatusFound, s.publicURL(entry))
+				return
+			}
+			setPublicUntil(&entry, time.Now())
+			err := model.DB.Save(&entry).Error
+			s.removeLocked(entry.ID)
+			s.mu.Unlock()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to renew public access"})
+				return
+			}
+		}
+		c.Header("Cache-Control", "no-store")
+		c.Redirect(http.StatusFound, s.publicURL(entry))
+		return
+	}
+	_, ticket, err := s.issue(c.Request.Context(), cs, user, entry)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Redirect(http.StatusFound, s.ticketURL(entry.ID, ticket))
 }
 
 // Wrap dispatches before Gin so upstream paths never enter Kite's router, redirects, or gzip middleware.

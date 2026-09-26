@@ -101,6 +101,7 @@ func InitDB() {
 		RoleAssignment{},
 		ResourceHistory{},
 		ResourceTemplate{},
+		ServiceAccess{},
 		PendingSession{},
 		HelmRepository{},
 		ScheduledTask{},

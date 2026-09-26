@@ -1,8 +1,9 @@
 # Service access
 
-Kite can open HTTP services on an isolated subdomain while retaining both Kite
-access control and the application's own login. This is separate from the legacy
-Kubernetes Service Proxy. It does not expose unauthenticated public ports.
+Kite can open HTTP services on an isolated subdomain while retaining the
+application's own login. Service addresses require Kite authorization by default;
+an administrator can make an individual address public. This is separate from
+the legacy Kubernetes Service Proxy.
 
 ## Minimal configuration with an existing Traefik ingress
 
@@ -67,18 +68,30 @@ clusters: [Homelab]
 namespaces: [default]
 ```
 
-Click a TCP port in a Service or Pod's overview, select HTTP or HTTPS and a start
-path (for example `/management.html`), then choose **Open service**. Each user and
-target has an isolated hostname. Sign into the application normally. The same
-dialog lists that port's access sessions and can close them, including active
-connections. Reopening an active target reuses its hostname and application cookies.
+Click a TCP port in a Service or Pod's overview, select HTTP or HTTPS, a start
+path (for example `/management.html`), and optionally a hostname label. The
+default label is the resource name and port, for example
+`cli-proxy-api-8317.access.example.com`. The label must be unique among all
+configured addresses; choose another if it is already in use. Dots in resource
+names become hyphens, and long names are shortened to fit DNS limits.
 
-Hostnames use the resource name, port, and a random 12-character suffix, for
-example `cli-proxy-api-8317-a7c9e2b4d610.access.example.com`. Dots in resource names
-become hyphens, and long names are shortened to fit DNS limits. The suffix keeps
-sessions isolated across users, clusters, and namespaces; it is not a credential.
+The address belongs to the user who configured it and survives Kite restarts.
+Each address has its own access duration (180 minutes by default, at most 525600
+minutes). Set it to `0` for no automatic expiration. Private access starts a new
+duration on each authorization from Kite. An administrator can enable public
+access for an individual address; its duration starts when public access is
+enabled. Visitors then need no Kite login or Kite proxy cookie, while the
+application's own authentication still applies. Only the owner can configure
+the address, and only an administrator can enable or renew public access.
+The top-right service access manager lists the user's configured addresses
+across clusters, with a count badge when any exist. It can reopen authorized
+addresses or remove them. Removing an address ends active connections. To rename an address,
+remove it and configure the port again. Sign into the application normally.
+Opening an address without an authorized session shows a Kite-styled access
+unavailable page; service hosts never redirect to the Kite login page. The
+initial ticket exchange shows a matching loading and error state.
 
-A short-lived, one-use ticket in the URL fragment establishes a host-only,
+A private address uses a short-lived, one-use ticket in the URL fragment to establish a host-only,
 Secure, HttpOnly Kite proxy cookie. Tickets are not sent in request URLs. Kite
 removes only its reserved `__Host-kite_service_session` cookie before forwarding;
 application cookies and Authorization headers remain intact. App response cookies
@@ -99,16 +112,23 @@ Applications remain responsible for their own authorization and CSRF protection.
 - HTTP methods, request bodies, WebSockets, and streamed responses pass through.
   Failed connections are not automatically replayed, especially write requests.
   A new connection resolves the Service's ready Pod again.
-- Sessions are in memory: use one Kite replica. Restarting Kite closes access.
-  Sessions close after 30 minutes without new HTTP requests, or after 8 hours,
-  including long-lived streams. There is a 1,024-session server limit.
+- Addresses and public expiration times are stored in Kite's database;
+  transport sessions remain in memory, so use one Kite replica. Restarting Kite
+  requires reopening private access; public addresses reconnect on demand.
+  Private sessions expire after their configured duration from the last Kite
+  authorization. Public access expires after its configured duration from
+  enablement and can be renewed by its administrator. `0` disables automatic
+  server expiration, including idle expiration. A private address still needs
+  reauthorization if the browser drops its session cookie. There is a
+  1,024-session server limit.
 - Signing out of the dashboard does not itself revoke an issued proxy session;
-  use **Close access** to revoke it immediately. Disabling the user or removing
-  permissions denies subsequent requests; existing streams end on close/expiry.
+  use **Remove address** to revoke it immediately. Disabling the user or removing
+  permissions denies subsequent requests; public access also requires the owner
+  to remain an administrator. Existing streams end on close/expiry.
 - Some apps need their external URL / trusted origin configured. Cross-app CORS
   is not relaxed automatically. `/.kite/access` and the proxy cookie name are
-  reserved. Share the Kite resource page rather than an app hostname: recipients
-  must create their own authorized access.
+  reserved. Share private access through a Kite resource page so recipients
+  create their own authorized address. Public addresses can be shared directly.
 
 This design borrows the separation of app authentication and app transport from
 Coder's workspace application proxy, without depending on Coder or its network.

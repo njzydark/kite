@@ -14,6 +14,7 @@ import { DynamicBreadcrumb } from './dynamic-breadcrumb'
 import { LanguageToggle } from './language-toggle'
 import { ModeToggle } from './mode-toggle'
 import { Search } from './search'
+import { ServiceAccessManager } from './service-access-manager'
 import { UserMenu } from './user-menu'
 
 export function SiteHeader() {
@@ -37,6 +38,7 @@ export function SiteHeader() {
           <DynamicBreadcrumb />
           <div className="ml-auto flex items-center gap-2">
             <Search />
+            <ServiceAccessManager />
             <Plus
               className="h-5 w-5 cursor-pointer text-muted-foreground hover:text-foreground"
               onClick={() => setCreateDialogOpen(true)}

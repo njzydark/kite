@@ -46,6 +46,11 @@ func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager, access *serv
 	accessAPI.POST("", access.Create)
 	accessAPI.GET("", access.List)
 	accessAPI.DELETE("/:id", access.Delete)
+	accessGlobalAPI := r.Group("/api/v1/service-access", authHandler.RequireAuth())
+	accessGlobalAPI.GET("", access.ListAll)
+	accessGlobalAPI.DELETE("/:id", access.DeleteAny)
+	accessGlobalAPI.PUT("/:id", access.Update)
+	accessGlobalAPI.GET("/:id/open", access.Open)
 }
 
 func registerBaseRoutes(r *gin.RouterGroup) {
