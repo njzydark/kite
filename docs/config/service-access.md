@@ -111,7 +111,11 @@ Applications remain responsible for their own authorization and CSRF protection.
   pinned so replacing an object does not silently grant access to its replacement.
 - HTTP methods, request bodies, WebSockets, and streamed responses pass through.
   Failed connections are not automatically replayed, especially write requests.
-  A new connection resolves the Service's ready Pod again.
+  A new connection resolves the Service's ready Pod again. Kite preserves the
+  ingress `X-Forwarded-For` chain and appends its own hop. Applications must
+  trust their configured proxies and log that header to show the visitor IP;
+  the TCP peer remains a cluster address. Do not trust client-supplied forwarding
+  headers at the ingress.
 - Addresses and public expiration times are stored in Kite's database;
   transport sessions remain in memory, so use one Kite replica. Restarting Kite
   requires reopening private access; public addresses reconnect on demand.

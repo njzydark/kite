@@ -63,7 +63,7 @@ namespaces: [default]
 
 - 本集群直接连接 Pod IP；Cluster Agent 集群复用 TCP 隧道；仅 kubeconfig 接入的远程集群使用 Kubernetes SPDY Port Forward。后者的集群凭据需要 Pods/Services 的 `get`、Service 选 Pod 所需的 Pods `list`、以及 `pods/portforward` 的 `create` 权限。网络策略仍然生效。
 - Service 必须有 selector 和就绪 Pod，不支持 ExternalName 或无 selector 的 Service。命名 targetPort 从 Pod 解析。Pod 仅支持已声明的 TCP 容器端口。会话绑定资源 UID，资源重建后需要重新打开。
-- 支持 HTTP 方法、请求体、WebSocket 和流式响应。不会自动重放失败请求，尤其是写请求；新建连接会重新选择就绪 Pod。
+- 支持 HTTP 方法、请求体、WebSocket 和流式响应。不会自动重放失败请求，尤其是写请求；新建连接会重新选择就绪 Pod。Kite 会保留入口的 `X-Forwarded-For` 链并追加自身这一跳。目标服务需信任已配置的代理并记录该请求头才能显示访客 IP；TCP 连接的源地址仍是集群地址。入口不应信任客户端自行提供的转发头。
 - 域名配置及公开访问截止时间保存在 Kite 数据库中；传输会话仍在内存中，因此仅支持单副本。Kite 重启后私人访问需重新授权，公开访问会按需重新连接。私人访问从上次 Kite 授权起按配置时间到期；公开访问从开启时起按配置时间到期，可由管理员续期。`0` 表示服务端不自动过期（包括空闲过期）；如果浏览器清除了私人访问的会话 Cookie，仍需重新授权。全局最多 1,024 个会话。
 - 退出 Kite 主站不会立即撤销已签发的代理会话，可使用“移除域名”立即撤销。禁用配置者或撤销资源权限会拒绝后续请求；公开访问还要求配置者保持管理员身份。已建立的流在移除或超时后结束。
 - 部分服务仍需设置外部 URL/可信来源；不会自动放宽跨服务 CORS。`/.kite/access` 和代理 Cookie 名称为保留字段。私人访问应分享 Kite 资源页面，由接收者用自己的权限创建域名；公开域名可以直接分享。

@@ -50,7 +50,7 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 }
 
 func buildEngine(ctx context.Context, cm *cluster.ClusterManager) http.Handler {
-	access, err := serviceaccess.New(ctx, cm)
+	access, err := serviceaccess.New(ctx, cm, staticFiles)
 	if err != nil {
 		klog.Fatalf("Invalid service access configuration: %v", err)
 	}

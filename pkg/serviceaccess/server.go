@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,6 +27,7 @@ import (
 const (
 	cookieName           = "__Host-kite_service_session"
 	exchangePath         = "/.kite/access"
+	iconPath             = "/.kite/icon.svg"
 	defaultAccessMinutes = 3 * 60
 	maxAccessMinutes     = 365 * 24 * 60
 	maxSessions          = 1024
@@ -64,11 +66,12 @@ type Server struct {
 	cm       *cluster.ClusterManager
 	domain   string
 	origin   string
+	icon     []byte
 	mu       sync.Mutex
 	sessions map[string]*session
 }
 
-func New(ctx context.Context, cm *cluster.ClusterManager) (*Server, error) {
+func New(ctx context.Context, cm *cluster.ClusterManager, assets fs.FS) (*Server, error) {
 	s := &Server{cm: cm, sessions: make(map[string]*session)}
 	if common.ServiceAccessDomain == "" {
 		return s, nil
@@ -83,6 +86,14 @@ func New(ctx context.Context, cm *cluster.ClusterManager) (*Server, error) {
 	}
 	if common.AnonymousUserEnabled {
 		return nil, errors.New("service access requires authenticated users; disable anonymous access")
+	}
+	icons, err := fs.Glob(assets, "static/assets/icon-*.svg")
+	if err != nil || len(icons) != 1 {
+		return nil, errors.New("service access requires the built Kite icon asset")
+	}
+	s.icon, err = fs.ReadFile(assets, icons[0])
+	if err != nil {
+		return nil, err
 	}
 	s.domain, s.origin = domain, origin.Scheme+"://"+origin.Host
 	go s.run(ctx)

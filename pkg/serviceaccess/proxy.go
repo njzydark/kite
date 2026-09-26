@@ -17,23 +17,25 @@ import (
 )
 
 const accessStyle = `
-:root { color-scheme: light; --bg: #fff; --fg: #171717; --muted: #737373; --border: #e5e5e5; --surface: #fafafa; }
+:root { color-scheme: light; --bg: oklch(1 0 0); --fg: oklch(0.141 0.005 285.823); --card: oklch(1 0 0); --muted: oklch(0.552 0.016 285.938); --border: oklch(0.92 0.004 286.32); --primary: oklch(0.55 0.22 235); }
 @media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --bg: #0a0a0a; --fg: #fafafa; --muted: #a3a3a3; --border: #262626; --surface: #171717; }
+  :root { color-scheme: dark; --bg: oklch(0.141 0.005 285.823); --fg: oklch(0.985 0 0); --card: oklch(0.21 0.006 285.885); --muted: oklch(0.705 0.015 286.067); --border: oklch(1 0 0 / 10%); --primary: oklch(0.65 0.18 235); }
+  .brand img { filter: invert(1); }
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 24px; }
-.card { width: min(100%, 420px); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 32px; text-align: center; box-shadow: 0 8px 30px #0000000a; }
-.mark { display: grid; place-items: center; margin: 0 auto 20px; width: 44px; height: 44px; border-radius: 12px; background: #2563eb; color: #fff; font-weight: 700; font-size: 24px; }
-h1 { font-size: 20px; line-height: 1.3; margin: 0 0 8px; }
-p { color: var(--muted); margin: 0; }
-.foot { font-size: 12px; margin-top: 24px; }
-.spinner { width: 26px; height: 26px; margin: 0 auto 20px; border: 3px solid var(--border); border-top-color: #2563eb; border-radius: 50%; animation: spin .8s linear infinite; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.page { width: min(100%, 448px); }
+.brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 32px; font-size: 24px; font-weight: 700; }
+.brand img { width: 40px; height: 40px; }
+.card { padding: 24px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); text-align: center; box-shadow: 0 1px 2px #0000000d; }
+h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; }
+p { margin: 8px 0 0; color: var(--muted); }
+.spinner { width: 48px; height: 48px; margin: 0 auto 20px; border: 2px solid transparent; border-bottom-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 `
 
-const exchangeHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><main class="card"><div class="mark">K</div><div id="spinner" class="spinner"></div><h1 id="title">Connecting to service</h1><p id="status">Checking your Kite access…</p><p class="foot">Kite · Service access</p></main><script nonce="{{NONCE}}">
+const exchangeHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><div id="spinner" class="spinner"></div><h1 id="title">Connecting to service</h1><p id="status">Checking your Kite access…</p></main></div><script nonce="{{NONCE}}">
 const zh = navigator.language.toLowerCase().startsWith('zh');
 if (zh) { document.getElementById('title').textContent = '正在连接服务'; document.getElementById('status').textContent = '正在验证 Kite 访问权限…'; }
 const ticket = location.hash.slice(1);
@@ -62,9 +64,9 @@ func accessDenied(w http.ResponseWriter, r *http.Request, status int) {
 	nonce := randomToken()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'nonce-"+nonce+"'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'nonce-"+nonce+"'; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
-	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><main class="card"><div class="mark">K</div><h1>{{TITLE}}</h1><p>{{MESSAGE}}</p><p class="foot">Kite · Service access</p></main></body></html>`
+	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><h1>{{TITLE}}</h1><p>{{MESSAGE}}</p></main></div></body></html>`
 	page = strings.NewReplacer("{{NONCE}}", nonce, "{{STYLE}}", accessStyle, "{{TITLE}}", title, "{{MESSAGE}}", message).Replace(page)
 	_, _ = io.WriteString(w, page)
 }
@@ -75,6 +77,20 @@ func sessionMatches(item *session, entry model.ServiceAccess, target Target, now
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 	w.Header().Set("Cache-Control", "private, no-store")
+	if r.URL.Path == iconPath {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Length", strconv.Itoa(len(s.icon)))
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(s.icon)
+		}
+		return
+	}
 	var entry model.ServiceAccess
 	if err := model.DB.Where("id = ?", id).First(&entry).Error; err != nil {
 		accessDenied(w, r, http.StatusGone)
@@ -159,6 +175,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, item *session) 
 		Rewrite: func(p *httputil.ProxyRequest) {
 			p.SetURL(upstream)
 			p.Out.Host = p.In.Host
+			p.Out.Header["X-Forwarded-For"] = p.In.Header["X-Forwarded-For"]
 			p.SetXForwarded()
 			p.Out.Header.Set("X-Forwarded-Proto", "https")
 			p.Out.Header.Del("Forwarded")
@@ -202,7 +219,7 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request, item *session)
 	if r.Method == http.MethodGet {
 		// The ticket stays in the fragment, never in ingress or application access logs.
 		nonce := randomToken()
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, strings.NewReplacer("{{NONCE}}", nonce, "{{STYLE}}", accessStyle).Replace(exchangeHTML))
 		return

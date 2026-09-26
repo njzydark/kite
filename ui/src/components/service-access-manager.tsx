@@ -174,7 +174,7 @@ export function ServiceAccessManager() {
         )}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="min-w-0 max-h-[80vh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{t('serviceAccess.manage')}</DialogTitle>
             <DialogDescription>
@@ -191,11 +191,11 @@ export function ServiceAccessManager() {
               {t('serviceAccess.empty')}
             </p>
           )}
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             {entries.data?.map((entry) => (
-              <div key={entry.id} className="rounded-md border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
+              <div key={entry.id} className="min-w-0 rounded-md border p-3">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <p className="font-medium">
                       {entry.name}:{entry.port}
                     </p>
@@ -222,7 +222,7 @@ export function ServiceAccessManager() {
                       {entry.hostname}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 flex-wrap gap-1 sm:justify-end">
                     {entry.authorized ? (
                       <Button variant="outline" size="sm" asChild>
                         <a
