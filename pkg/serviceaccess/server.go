@@ -28,6 +28,7 @@ const (
 	cookieName           = "__Host-kite_service_session"
 	exchangePath         = "/.kite/access"
 	iconPath             = "/.kite/icon.svg"
+	deniedPath           = "/.kite/denied"
 	defaultAccessMinutes = 3 * 60
 	maxAccessMinutes     = 365 * 24 * 60
 	maxSessions          = 1024
@@ -43,6 +44,11 @@ type Target struct {
 
 func (t Target) valid() bool {
 	return (t.Kind == "services" || t.Kind == "pods") && t.Namespace != common.AllNamespaces && len(validation.IsDNS1123Label(t.Namespace)) == 0 && len(validation.IsDNS1123Subdomain(t.Name)) == 0 && t.Port > 0 && t.Port <= 65535 && (t.Scheme == "http" || t.Scheme == "https")
+}
+
+func validAccessPath(path string) bool {
+	parsed, err := url.ParseRequestURI(path)
+	return err == nil && !parsed.IsAbs() && strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//") && !strings.ContainsAny(path, "\\\r\n")
 }
 
 type session struct {
@@ -217,8 +223,7 @@ func (s *Server) prepareCreate(c *gin.Context) (createRequest, model.User, *clus
 	if request.Path == "" {
 		request.Path = "/"
 	}
-	parsed, pathErr := url.ParseRequestURI(request.Path)
-	if pathErr != nil || parsed.IsAbs() || !strings.HasPrefix(request.Path, "/") || strings.HasPrefix(request.Path, "//") || strings.ContainsAny(request.Path, "\\\r\n") {
+	if !validAccessPath(request.Path) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "start path must be a local path beginning with /"})
 		return request, user, nil, false
 	}
@@ -344,6 +349,21 @@ func (s *Server) ticketURL(id, ticket string) string {
 	return "https://" + id + "." + s.domain + exchangePath + "#" + ticket
 }
 
+func (s *Server) reconnectURL(entry model.ServiceAccess, r *http.Request) string {
+	path := r.URL.RequestURI()
+	if r.URL.Path == exchangePath || !validAccessPath(path) {
+		path = entry.Path
+	}
+	return s.origin + common.Base + "/api/v1/service-access/" + url.PathEscape(entry.ID) + "/reconnect#" + url.QueryEscape(path)
+}
+
+func (s *Server) ReconnectDeniedURL(id string) (string, bool) {
+	if s.domain == "" || !s.validAlias(id) {
+		return "", false
+	}
+	return "https://" + id + "." + s.domain + deniedPath, true
+}
+
 func (s *Server) publicURL(entry model.ServiceAccess) string {
 	return "https://" + entry.ID + "." + s.domain + entry.Path
 }
@@ -425,10 +445,11 @@ func (s *Server) list(c *gin.Context, currentClusterOnly bool) {
 		authorized := clusterErr == nil && allowed(user, entry.Cluster, target) && (!entry.Public || isAdmin(user))
 		item := s.sessions[entry.ID]
 		var expiresAt *time.Time
-		if item != nil && !expired(item.ExpiresAt, now) {
+		active := item != nil && sessionMatches(item, entry, target, now)
+		if active {
 			expiresAt = expiryJSON(item.ExpiresAt)
 		}
-		items = append(items, gin.H{"id": entry.ID, "cluster": entry.Cluster, "namespace": entry.Namespace, "kind": entry.Kind, "name": entry.Name, "port": entry.Port, "scheme": entry.Scheme, "path": entry.Path, "hostname": "https://" + entry.ID + "." + s.domain, "expiresAt": expiresAt, "expiresInMinutes": entry.ExpiresInMinutes, "public": entry.Public, "publicUntil": entry.PublicUntil, "authorized": authorized})
+		items = append(items, gin.H{"id": entry.ID, "cluster": entry.Cluster, "namespace": entry.Namespace, "kind": entry.Kind, "name": entry.Name, "port": entry.Port, "scheme": entry.Scheme, "path": entry.Path, "hostname": "https://" + entry.ID + "." + s.domain, "active": active, "expiresAt": expiresAt, "expiresInMinutes": entry.ExpiresInMinutes, "public": entry.Public, "publicUntil": entry.PublicUntil, "authorized": authorized})
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, items)
@@ -526,27 +547,50 @@ func (s *Server) delete(c *gin.Context, currentClusterOnly bool) {
 }
 
 func (s *Server) Open(c *gin.Context) {
+	s.open(c, false)
+}
+
+func (s *Server) Reconnect(c *gin.Context) {
+	s.open(c, true)
+}
+
+func (s *Server) openError(c *gin.Context, reconnect bool, status int, message string) {
+	if reconnect {
+		if deniedURL, ok := s.ReconnectDeniedURL(c.Param("id")); ok {
+			c.Header("Cache-Control", "no-store")
+			c.Redirect(http.StatusSeeOther, deniedURL)
+			return
+		}
+	}
+	c.JSON(status, gin.H{"error": message})
+}
+
+func (s *Server) open(c *gin.Context, reconnect bool) {
 	if s.domain == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "service access is not configured"})
+		s.openError(c, reconnect, http.StatusServiceUnavailable, "service access is not configured")
 		return
 	}
 	user := c.MustGet("user").(model.User)
 	var entry model.ServiceAccess
 	if err := model.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&entry).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "service access not found"})
+		s.openError(c, reconnect, http.StatusNotFound, "service access not found")
 		return
 	}
 	target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
 	if !allowed(user, entry.Cluster, target) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "get and portforward permissions are required"})
+		s.openError(c, reconnect, http.StatusForbidden, "get and portforward permissions are required")
 		return
 	}
 	cs, err := s.cm.GetClientSet(entry.Cluster)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		s.openError(c, reconnect, http.StatusNotFound, "cluster not found")
 		return
 	}
 	if entry.Public {
+		if reconnect {
+			s.openError(c, true, http.StatusForbidden, "private service access required")
+			return
+		}
 		if !isAdmin(user) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "only administrators can renew public access"})
 			return
@@ -579,11 +623,15 @@ func (s *Server) Open(c *gin.Context) {
 	}
 	_, ticket, err := s.issue(c.Request.Context(), cs, user, entry)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		s.openError(c, reconnect, http.StatusBadRequest, err.Error())
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.Redirect(http.StatusFound, s.ticketURL(entry.ID, ticket))
+	if reconnect {
+		s.reconnect(c.Writer, c.Request, entry.ID, ticket)
+	} else {
+		c.Redirect(http.StatusFound, s.ticketURL(entry.ID, ticket))
+	}
 }
 
 // Wrap dispatches before Gin so upstream paths never enter Kite's router, redirects, or gzip middleware.

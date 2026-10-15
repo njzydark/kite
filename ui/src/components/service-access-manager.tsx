@@ -24,6 +24,37 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 
+function AccessStatus({
+  entry,
+  now,
+}: {
+  entry: ServiceAccessEntry
+  now: number
+}) {
+  const { t } = useTranslation()
+  const expiration = entry.public ? entry.publicUntil : entry.expiresAt
+  let status: string
+
+  if (expiration) {
+    const expiresAt = new Date(expiration)
+    const key = expiresAt.getTime() <= now ? 'expired' : 'currentExpires'
+    status = t(`serviceAccess.${key}`, { time: expiresAt.toLocaleString() })
+  } else if (entry.public ? entry.expiresInMinutes === 0 : entry.active) {
+    status = t('serviceAccess.neverExpires')
+  } else {
+    status = t('serviceAccess.notActive')
+  }
+
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">
+        {t(entry.public ? 'serviceAccess.public' : 'serviceAccess.private')}
+      </p>
+      <p className="text-sm font-medium tabular-nums">{status}</p>
+    </div>
+  )
+}
+
 function EntrySettings({
   entry,
   isAdmin,
@@ -202,14 +233,7 @@ export function ServiceAccessManager() {
                     <p className="text-xs text-muted-foreground">
                       {entry.cluster} / {entry.namespace} / {entry.kind}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {entry.public
-                        ? t('serviceAccess.public')
-                        : t('serviceAccess.private')}
-                      {entry.public &&
-                        entry.publicUntil &&
-                        ` · ${t('serviceAccess.expires', { time: new Date(entry.publicUntil).toLocaleString() })}`}
-                    </p>
+                    <AccessStatus entry={entry} now={entries.dataUpdatedAt} />
                     {!entry.authorized && (
                       <p className="text-xs text-destructive">
                         {t('serviceAccess.noPermission')}
@@ -231,7 +255,11 @@ export function ServiceAccessManager() {
                           rel="noopener noreferrer"
                         >
                           <IconExternalLink className="size-4" />
-                          {t('serviceAccess.open')}
+                          {t(
+                            entry.public
+                              ? 'serviceAccess.open'
+                              : 'serviceAccess.authorizeAndOpen'
+                          )}
                         </a>
                       </Button>
                     ) : (

@@ -116,6 +116,23 @@ func (h *AuthHandler) RequireAuth() gin.HandlerFunc {
 	}
 }
 
+func (h *AuthHandler) RequireBrowserAuth(onFailure func(*gin.Context)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var user *model.User
+		if !common.AnonymousUserEnabled {
+			user = h.bootstrapUser(c, &model.GeneralSetting{})
+		}
+		if user == nil {
+			setCookieSecure(c, "auth_token", "", -1)
+			onFailure(c)
+			c.Abort()
+			return
+		}
+		c.Set("user", *user)
+		c.Next()
+	}
+}
+
 func (h *AuthHandler) RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user, exists := c.Get("user")

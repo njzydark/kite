@@ -1351,7 +1351,7 @@
   "serviceAccess": {
     "title": "Access service",
     "manage": "Manage service access",
-    "manageDescription": "Your configured service addresses across clusters. Open one to authorize a new access session, or remove it to revoke access.",
+    "manageDescription": "For private access, authorize and open gives this browser access and restarts the access period. Opening a private address directly requires a valid access cookie.",
     "empty": "No service addresses configured yet. Open a TCP port from a Service or Pod to create one.",
     "noPermission": "Access permission or cluster is unavailable",
     "description": "Open the service using your Kite access. Sign in to the service separately if required.",
@@ -1369,9 +1369,13 @@
     "protocol": "Service protocol",
     "path": "Start path",
     "open": "Open service",
+    "authorizeAndOpen": "Authorize and open",
     "close": "Close access",
     "remove": "Remove address",
-    "expires": "Expires at {{time}}",
+    "currentExpires": "Current expiration: {{time}}",
+    "expired": "Expired at {{time}}; open service to renew",
+    "neverExpires": "No automatic expiration",
+    "notActive": "Not authorized or expired; open service to authorize",
     "lifetime": "The address is retained until removed. Private access requires get and portforward permissions; public access requires an administrator to enable it.",
     "popupBlocked": "Allow pop-ups for Kite to open the service.",
     "failed": "Unable to manage service access."

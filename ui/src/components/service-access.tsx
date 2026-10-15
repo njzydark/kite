@@ -303,7 +303,11 @@ export function ServiceAccess({
           onClick={launch}
         >
           <IconExternalLink className="size-4" />
-          {t('serviceAccess.open')}
+          {t(
+            selectedPublic
+              ? 'serviceAccess.open'
+              : 'serviceAccess.authorizeAndOpen'
+          )}
         </Button>
         {matching.map((session: ServiceAccessEntry) => (
           <div

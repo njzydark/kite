@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -30,28 +31,31 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding
 .card { padding: 24px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); text-align: center; box-shadow: 0 1px 2px #0000000d; }
 h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; }
 p { margin: 8px 0 0; color: var(--muted); }
-.spinner { width: 48px; height: 48px; margin: 0 auto 20px; border: 2px solid transparent; border-bottom-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.action { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; margin-top: 20px; padding: 0 14px; border-radius: 6px; background: var(--primary); color: white; font-weight: 500; text-decoration: none; }
 `
 
-const exchangeHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><div id="spinner" class="spinner"></div><h1 id="title">Connecting to service</h1><p id="status">Checking your Kite access…</p></main></div><script nonce="{{NONCE}}">
+const exchangeHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><h1 id="title">Connecting to service</h1><p id="status">Checking your Kite access…</p></main></div><script nonce="{{NONCE}}">
 const zh = navigator.language.toLowerCase().startsWith('zh');
 if (zh) { document.getElementById('title').textContent = '正在连接服务'; document.getElementById('status').textContent = '正在验证 Kite 访问权限…'; }
-const ticket = location.hash.slice(1);
+const fragment = location.hash.slice(1);
+const ticket = fragment.split('&', 1)[0];
+const path = new URLSearchParams(fragment.slice(ticket.length + 1)).get('path');
 history.replaceState(null, '', location.pathname);
 if (!ticket) {
-  document.getElementById('spinner').remove();
   document.getElementById('title').textContent = zh ? '无法访问' : 'Access unavailable';
   document.getElementById('status').textContent = zh ? '请从 Kite 中重新打开该服务。' : 'Open this service again from Kite.';
 } else {
-  fetch(location.pathname, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ticket})})
-    .then(async response => { if (!response.ok) throw new Error(); const result = await response.json(); location.replace(result.path); })
-    .catch(() => { document.getElementById('spinner').remove(); document.getElementById('title').textContent = zh ? '无法访问' : 'Access unavailable'; document.getElementById('status').textContent = zh ? '授权已失效，请从 Kite 中重新打开该服务。' : 'Access expired. Open this service again from Kite.'; });
+  fetch(location.pathname, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ticket, path: path || undefined})})
+    .then(async response => { if (!response.ok) throw new Error(); const result = await response.json(); document.getElementById('title').textContent = zh ? '正在打开服务' : 'Opening service'; document.getElementById('status').textContent = zh ? '即将跳转到服务页面。' : 'Redirecting to the service page.'; location.replace(result.path); })
+    .catch(() => { document.getElementById('title').textContent = zh ? '无法访问' : 'Access unavailable'; document.getElementById('status').textContent = zh ? '授权已失效，请从 Kite 中重新打开该服务。' : 'Access expired. Open this service again from Kite.'; });
 }
 </script></body></html>`
 
 func accessDenied(w http.ResponseWriter, r *http.Request, status int) {
+	accessDeniedWithReconnect(w, r, status, "")
+}
+
+func accessDeniedWithReconnect(w http.ResponseWriter, r *http.Request, status int, reconnectURL string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Service access unavailable", status)
 		return
@@ -61,14 +65,47 @@ func accessDenied(w http.ResponseWriter, r *http.Request, status int) {
 	if zh {
 		title, message = "无法访问", "请从 Kite 中打开该服务并完成授权。"
 	}
+	if r.URL.Path == deniedPath {
+		message = "Your Kite login is unavailable, or you no longer have permission to access this service."
+		if zh {
+			message = "当前没有有效的 Kite 登录，或已失去该服务的访问权限。"
+		}
+	}
+	action := ""
+	if reconnectURL != "" {
+		message = "If you are signed in to Kite, reauthorize to continue."
+		label := "Reauthorize with Kite"
+		if zh {
+			message, label = "如果当前已登录 Kite，可以重新授权后继续访问。", "通过 Kite 重新授权"
+		}
+		action = `<a class="action" href="` + html.EscapeString(reconnectURL) + `">` + label + `</a>`
+	}
 	nonce := randomToken()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'nonce-"+nonce+"'; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
-	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><h1>{{TITLE}}</h1><p>{{MESSAGE}}</p></main></div></body></html>`
-	page = strings.NewReplacer("{{NONCE}}", nonce, "{{STYLE}}", accessStyle, "{{TITLE}}", title, "{{MESSAGE}}", message).Replace(page)
+	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="/.kite/icon.svg"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="/.kite/icon.svg" alt=""><span>Kite</span></div><main class="card"><h1>{{TITLE}}</h1><p>{{MESSAGE}}</p>{{ACTION}}</main></div></body></html>`
+	page = strings.NewReplacer("{{NONCE}}", nonce, "{{STYLE}}", accessStyle, "{{TITLE}}", title, "{{MESSAGE}}", message, "{{ACTION}}", action).Replace(page)
 	_, _ = io.WriteString(w, page)
+}
+
+func (s *Server) reconnect(w http.ResponseWriter, r *http.Request, id, ticket string) {
+	nonce := randomToken()
+	accessURL := s.ticketURL(id, ticket)
+	serviceOrigin := "https://" + id + "." + s.domain
+	title, message, continueLabel := "Opening service", "Redirecting to the service page.", "Continue to service"
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Accept-Language")), "zh") {
+		title, message, continueLabel = "正在打开服务", "即将跳转到服务页面。", "继续访问服务"
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src "+serviceOrigin+"; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kite · Service access</title><link rel="icon" type="image/svg+xml" href="{{ICON}}"><style nonce="{{NONCE}}">{{STYLE}}</style></head><body><div class="page"><div class="brand"><img src="{{ICON}}" alt=""><span>Kite</span></div><main class="card"><h1>{{TITLE}}</h1><p>{{MESSAGE}}</p><a id="reconnect" class="action" href="{{URL}}">{{CONTINUE}}</a></main></div><script nonce="{{NONCE}}">const link = document.getElementById('reconnect'); if (location.hash.length > 1) link.href += '&path=' + location.hash.slice(1); location.replace(link.href);</script></body></html>`
+	_, _ = io.WriteString(w, strings.NewReplacer("{{URL}}", html.EscapeString(accessURL), "{{ICON}}", html.EscapeString(serviceOrigin+iconPath), "{{NONCE}}", nonce, "{{STYLE}}", accessStyle, "{{TITLE}}", title, "{{MESSAGE}}", message, "{{CONTINUE}}", continueLabel).Replace(page))
 }
 
 func sessionMatches(item *session, entry model.ServiceAccess, target Target, now time.Time) bool {
@@ -89,6 +126,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(s.icon)
 		}
+		return
+	}
+	if r.URL.Path == deniedPath {
+		accessDenied(w, r, http.StatusForbidden)
 		return
 	}
 	var entry model.ServiceAccess
@@ -121,7 +162,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	if item == nil {
-		accessDenied(w, r, http.StatusGone)
+		if entry.Public {
+			accessDenied(w, r, http.StatusGone)
+		} else {
+			accessDeniedWithReconnect(w, r, http.StatusGone, s.reconnectURL(entry, r))
+		}
 		return
 	}
 	if r.URL.Path == exchangePath {
@@ -135,7 +180,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 	if !entry.Public {
 		cookie, err := r.Cookie(cookieName)
 		if err != nil {
-			accessDenied(w, r, http.StatusUnauthorized)
+			accessDeniedWithReconnect(w, r, http.StatusUnauthorized, s.reconnectURL(entry, r))
 			return
 		}
 		digest := sha256.Sum256([]byte(cookie.Value))
@@ -148,7 +193,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		s.mu.Unlock()
 		if !valid {
-			accessDenied(w, r, http.StatusUnauthorized)
+			accessDeniedWithReconnect(w, r, http.StatusUnauthorized, s.reconnectURL(entry, r))
 			return
 		}
 	}
@@ -156,7 +201,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 	active := s.sessions[id] == item && !expired(item.ExpiresAt, time.Now())
 	s.mu.Unlock()
 	if !active {
-		accessDenied(w, r, http.StatusGone)
+		accessDeniedWithReconnect(w, r, http.StatusGone, s.reconnectURL(entry, r))
 		return
 	}
 	s.forward(w, r, item)
@@ -235,15 +280,21 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request, item *session)
 	}
 	var request struct {
 		Ticket string `json:"ticket"`
+		Path   string `json:"path"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&request); err != nil || len(request.Ticket) != 64 {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&request); err != nil || len(request.Ticket) != 64 {
 		http.Error(w, "Invalid access ticket", http.StatusBadRequest)
+		return
+	}
+	if request.Path != "" && !validAccessPath(request.Path) {
+		http.Error(w, "Invalid return path", http.StatusBadRequest)
 		return
 	}
 	digest := sha256.Sum256([]byte(request.Ticket))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sessions[item.ID] != item || time.Now().After(item.ticketExpires) || subtle.ConstantTimeCompare(digest[:], item.ticket[:]) != 1 {
+	now := time.Now()
+	if s.sessions[item.ID] != item || expired(item.ExpiresAt, now) || !now.Before(item.ticketExpires) || subtle.ConstantTimeCompare(digest[:], item.ticket[:]) != 1 {
 		http.Error(w, "Access ticket expired. Open the service again from Kite.", http.StatusUnauthorized)
 		return
 	}
@@ -256,8 +307,12 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request, item *session)
 	item.ticketExpires = time.Time{}
 	cookieExpiry := item.ExpiresAt
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: secret, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: cookieExpiry})
+	path := request.Path
+	if path == "" {
+		path = item.ticketPath
+	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"path": item.ticketPath}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]string{"path": path}); err != nil {
 		return
 	}
 }

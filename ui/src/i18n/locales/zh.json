@@ -1438,7 +1438,7 @@
   "serviceAccess": {
     "title": "访问服务",
     "manage": "管理服务访问",
-    "manageDescription": "跨集群管理已配置的服务域名。打开服务可重新授权，移除域名会撤销访问。",
+    "manageDescription": "私人访问可通过“授权并打开”为当前浏览器授权，并重新计算有效期；直接访问私人服务域名需已有有效授权 Cookie。",
     "empty": "尚未配置服务域名。请从 Service 或 Pod 的 TCP 端口创建。",
     "noPermission": "当前无访问权限或集群不可用",
     "description": "使用 Kite 权限打开服务；如服务有自己的登录，请在服务页面继续登录。",
@@ -1456,9 +1456,13 @@
     "protocol": "服务协议",
     "path": "起始路径",
     "open": "打开服务",
+    "authorizeAndOpen": "授权并打开",
     "close": "关闭访问",
     "remove": "移除域名",
-    "expires": "{{time}} 到期",
+    "currentExpires": "当前到期时间：{{time}}",
+    "expired": "已于 {{time}} 过期，打开服务可续期",
+    "neverExpires": "不会自动过期",
+    "notActive": "尚未授权或已过期，打开服务可授权",
     "lifetime": "域名会保留直至移除。私人访问需要 get 和 portforward 权限；公开访问需管理员开启。",
     "popupBlocked": "请允许 Kite 弹出新窗口以打开服务。",
     "failed": "无法管理服务访问。"

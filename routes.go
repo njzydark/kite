@@ -51,6 +51,15 @@ func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager, access *serv
 	accessGlobalAPI.DELETE("/:id", access.DeleteAny)
 	accessGlobalAPI.PUT("/:id", access.Update)
 	accessGlobalAPI.GET("/:id/open", access.Open)
+	r.GET("/api/v1/service-access/:id/reconnect", authHandler.RequireBrowserAuth(func(c *gin.Context) {
+		deniedURL, ok := access.ReconnectDeniedURL(c.Param("id"))
+		if !ok {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.Redirect(http.StatusSeeOther, deniedURL)
+	}), access.Reconnect)
 }
 
 func registerBaseRoutes(r *gin.RouterGroup) {

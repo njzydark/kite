@@ -11,6 +11,7 @@ export interface ServiceAccessEntry {
   scheme: string
   path: string
   hostname: string
+  active: boolean
   expiresAt: string | null
   expiresInMinutes: number
   public: boolean
