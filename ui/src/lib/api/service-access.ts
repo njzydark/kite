@@ -9,6 +9,7 @@ export interface ServiceAccessEntry {
   name: string
   port: number
   scheme: string
+  skipTLSVerify: boolean
   path: string
   hostname: string
   active: boolean
@@ -31,7 +32,12 @@ export function deleteServiceAccess(id: string) {
 
 export function updateServiceAccess(
   id: string,
-  settings: { expiresInMinutes: number; public: boolean }
+  settings: {
+    expiresInMinutes: number
+    public: boolean
+    scheme?: string
+    skipTLSVerify?: boolean
+  }
 ) {
   return apiClient.put(`/service-access/${encodeURIComponent(id)}`, settings)
 }

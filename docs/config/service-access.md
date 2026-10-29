@@ -5,6 +5,21 @@ application's own login. Service addresses require Kite authorization by default
 an administrator can make an individual address public. This is separate from
 the legacy Kubernetes Service Proxy.
 
+HTTPS upstream certificates are verified by default. An individual address can
+enable **Skip upstream certificate verification** for self-signed certificates;
+other addresses and Kite's own TLS configuration are unaffected. Existing
+addresses can change their protocol and this setting in **Manage service
+access**. Saving closes that address's active connections and requires private
+access to be authorized again, without extending its public expiration.
+
+ExternalName Services support DNS names and IP addresses. If the Service has no
+declared ports, use **Access external service** and enter a TCP port, such as
+`5001` for DSM HTTPS. Declared ports remain authoritative when present. New
+addresses on port `443` default to HTTPS. For an Argo CD server with TLS enabled,
+select HTTPS on port `443` to avoid HTTP-to-HTTPS redirect loops; opt into
+skipping certificate verification if its certificate is self-signed. Skipping
+verification keeps encryption but does not authenticate the upstream server.
+
 ## Minimal configuration with an existing Traefik ingress
 
 With one existing Kite ingress host, one replica, anonymous access disabled, and
@@ -105,8 +120,14 @@ Applications remain responsible for their own authorization and CSRF protection.
   TCP tunnel. Kubeconfig-only remote clusters use Kubernetes SPDY Port Forward;
   their credentials need `get` on Pods/Services, `list` on Pods for Services, and
   `create` on `pods/portforward`. Network policy still applies.
-- Services must have selectors and ready Pods; ExternalName and selectorless
-  Services are not supported. Named target ports are resolved against the Pod.
+- Services with selectors use ready Pods. Named target ports are resolved against the Pod.
+  ExternalName Services connect to their DNS name or IP. Selectorless Services
+  use matching IPv4/IPv6 TCP EndpointSlices whose endpoints are not terminating
+  and not explicitly unready; cluster credentials need `list` on EndpointSlices.
+  Loopback, link-local and non-unicast IPs are rejected as external endpoints.
+  External Services require an in-cluster Kite or a Cluster Agent with network
+  access to the destination. DNS is resolved in that network. Kubeconfig-only
+  remote clusters cannot port-forward external endpoints and return an error.
   Pod access accepts declared TCP container ports. Kubernetes resource UIDs are
   pinned so replacing an object does not silently grant access to its replacement.
 - HTTP methods, request bodies, WebSockets, and streamed responses pass through.

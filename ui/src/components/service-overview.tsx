@@ -291,6 +291,7 @@ function ServiceInformationCard({
               namespace={namespace}
               name={service.metadata?.name || ''}
               ports={service.spec?.ports || []}
+              externalName={service.spec?.type === 'ExternalName'}
             />
           </div>
 
@@ -314,14 +315,28 @@ function ServicePorts({
   namespace,
   name,
   ports,
+  externalName,
 }: {
   namespace?: string
   name: string
   ports: ServicePort[]
+  externalName: boolean
 }) {
   const { t } = useTranslation()
 
   if (ports.length === 0) {
+    if (externalName) {
+      return (
+        <ServiceAccess
+          namespace={namespace}
+          kind="services"
+          name={name}
+          legacyHref=""
+        >
+          {t('serviceAccess.openExternal')}
+        </ServiceAccess>
+      )
+    }
     return (
       <div className="text-sm text-muted-foreground">
         {t('common.messages.noPorts')}

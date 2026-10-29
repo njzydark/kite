@@ -22,6 +22,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 
 function AccessStatus({
@@ -68,13 +75,17 @@ function EntrySettings({
     String(entry.expiresInMinutes)
   )
   const [isPublic, setIsPublic] = useState(entry.public)
+  const [scheme, setScheme] = useState(entry.scheme)
+  const [skipTLSVerify, setSkipTLSVerify] = useState(entry.skipTLSVerify)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     setExpiresInMinutes(String(entry.expiresInMinutes))
     setIsPublic(entry.public)
-  }, [entry.expiresInMinutes, entry.public])
+    setScheme(entry.scheme)
+    setSkipTLSVerify(entry.skipTLSVerify)
+  }, [entry.expiresInMinutes, entry.public, entry.scheme, entry.skipTLSVerify])
 
   const save = async () => {
     setBusy(true)
@@ -83,6 +94,8 @@ function EntrySettings({
       await updateServiceAccess(entry.id, {
         expiresInMinutes: Number(expiresInMinutes),
         public: isPublic,
+        scheme,
+        skipTLSVerify: scheme === 'https' && skipTLSVerify,
       })
       await queryClient.invalidateQueries({ queryKey: serviceAccessQueryKey })
     } catch (reason) {
@@ -100,6 +113,37 @@ function EntrySettings({
         {t('serviceAccess.settings')}
       </summary>
       <div className="mt-3 space-y-3">
+        <div className="space-y-1">
+          <Label htmlFor={`service-access-protocol-${entry.id}`}>
+            {t('serviceAccess.protocol')}
+          </Label>
+          <Select value={scheme} onValueChange={setScheme}>
+            <SelectTrigger id={`service-access-protocol-${entry.id}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="http">HTTP</SelectItem>
+              <SelectItem value="https">HTTPS</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {scheme === 'https' && (
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <Label htmlFor={`service-access-skip-tls-${entry.id}`}>
+                {t('serviceAccess.skipTLSVerify')}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t('serviceAccess.skipTLSVerifyHelp')}
+              </p>
+            </div>
+            <Switch
+              id={`service-access-skip-tls-${entry.id}`}
+              checked={skipTLSVerify}
+              onCheckedChange={setSkipTLSVerify}
+            />
+          </div>
+        )}
         <div className="space-y-1">
           <Label htmlFor={`service-access-expiry-${entry.id}`}>
             {t('serviceAccess.expirationMinutes')}

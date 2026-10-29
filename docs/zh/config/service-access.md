@@ -38,7 +38,7 @@ ingress:
       hosts: ['*.access.example.com']
 ```
 
-Chart 自动添加通配 Ingress 规则。非 Helm 部署设置 `SERVICE_ACCESS_DOMAIN=access.example.com` 和 `HOST=https://kite.example.com`，将通配域名转发到 Kite 并保留 Host。即使主站设置了 `KITE_BASE`，服务仍从 `/` 访问。入口需要允许 WebSocket Upgrade，并为流式响应配置合适的超时。上游 HTTPS 会校验证书，不会自动忽略自签名证书错误。
+Chart 自动添加通配 Ingress 规则。非 Helm 部署设置 `SERVICE_ACCESS_DOMAIN=access.example.com` 和 `HOST=https://kite.example.com`，将通配域名转发到 Kite 并保留 Host。即使主站设置了 `KITE_BASE`，服务仍从 `/` 访问。入口需要允许 WebSocket Upgrade，并为流式响应配置合适的超时。上游 HTTPS 默认校验证书；可为单个地址开启“跳过上游证书校验”以兼容自签名证书，该设置不会影响其他地址或 Kite 主站。
 
 ## 权限与操作
 
@@ -53,6 +53,10 @@ namespaces: [default]
 
 点击 Service 或 Pod 概览中的 TCP 端口，选择 HTTP/HTTPS、起始路径（例如 `/management.html`）和可选的域名前缀，再点击“打开服务”。默认域名前缀是资源名和端口，例如 `cli-proxy-api-8317.kite.njzydark.com`。域名前缀在所有已配置服务中必须唯一；冲突时可以自定义。资源名中的点会转为连字符，过长名称会按 DNS 长度限制截短。
 
+没有声明端口的 ExternalName 服务会显示“访问外部服务”，可手动填写 TCP 端口。目标地址从 Service 的 `externalName` 读取，支持 DNS 名称和 IP，无需修改 Service。例如 DSM 可填写 `5001`、选择 HTTPS，并按需开启跳过证书校验。Argo CD 启用自身 TLS 时应选择 HTTPS、`443`，避免 HTTP 回源导致重定向循环。`443` 端口的新地址默认选择 HTTPS。
+
+“管理服务访问”中的访问设置可以修改协议及证书校验选项；保存会结束该地址的活动连接，私人访问需要重新授权。跳过校验后连接仍加密，但不验证服务器身份。修改这些选项不会延长已有公开地址的有效期。
+
 域名归配置它的用户所有，Kite 重启后仍保留。每个域名独立设置访问有效期，默认 180 分钟，最大 525600 分钟；`0` 表示不自动过期。私人访问每次从 Kite 授权后重新计时。管理员可为单个域名开启公开访问，公开有效期从开启时计时。访客无需登录 Kite，也无需 Kite 代理 Cookie；服务自己的鉴权仍然生效。仅配置者可以管理该域名，且只有管理员可以开启或续期公开访问。
 
 右上角“管理服务访问”展示该用户跨集群配置的域名，有配置时显示数量角标；有权限的域名可重新打开，所有本人配置的域名均可移除。移除会立即结束活动连接；修改域名需先移除再重新配置。未获得有效访问会话时，服务域名只显示 Kite 风格的“无法访问”页面，不跳转到 Kite 登录页。私人访问的初次授权页面使用一致的加载和失败状态。
@@ -62,7 +66,8 @@ namespaces: [default]
 ## 连接方式与边界
 
 - 本集群直接连接 Pod IP；Cluster Agent 集群复用 TCP 隧道；仅 kubeconfig 接入的远程集群使用 Kubernetes SPDY Port Forward。后者的集群凭据需要 Pods/Services 的 `get`、Service 选 Pod 所需的 Pods `list`、以及 `pods/portforward` 的 `create` 权限。网络策略仍然生效。
-- Service 必须有 selector 和就绪 Pod，不支持 ExternalName 或无 selector 的 Service。命名 targetPort 从 Pod 解析。Pod 仅支持已声明的 TCP 容器端口。会话绑定资源 UID，资源重建后需要重新打开。
+- 有 selector 的 Service 通过就绪 Pod 连接，命名 targetPort 从 Pod 解析。ExternalName 通过其 DNS 名称或 IP 连接；有声明端口时只能选择其 TCP 端口，没有声明端口时可手动指定。无 selector 的 Service 通过关联 EndpointSlice 中未终止、就绪状态非 false 的 IPv4/IPv6 TCP 端点连接，需要集群凭据具有 EndpointSlice 的 `list` 权限。回环、链路本地和非单播 IP 不作为外部端点。
+- 外部服务需要本集群 Kite 或 Cluster Agent 能访问目标网络，DNS 在连接所在网络解析。仅 kubeconfig 接入的远程集群无法对外部端点做 Pod Port Forward，会返回明确错误。Pod 仍仅支持已声明的 TCP 容器端口。会话绑定资源 UID，资源重建或 ExternalName 目标变化后需要重新打开。
 - 支持 HTTP 方法、请求体、WebSocket 和流式响应。不会自动重放失败请求，尤其是写请求；新建连接会重新选择就绪 Pod。Kite 会保留入口的 `X-Forwarded-For` 链并追加自身这一跳。目标服务需信任已配置的代理并记录该请求头才能显示访客 IP；TCP 连接的源地址仍是集群地址。入口不应信任客户端自行提供的转发头。
 - 域名配置及公开访问截止时间保存在 Kite 数据库中；传输会话仍在内存中，因此仅支持单副本。Kite 重启后私人访问需重新授权，公开访问会按需重新连接。私人访问从上次 Kite 授权起按配置时间到期；公开访问从开启时起按配置时间到期，可由管理员续期。`0` 表示服务端不自动过期（包括空闲过期）；如果浏览器清除了私人访问的会话 Cookie，仍需重新授权。全局最多 1,024 个会话。
 - 退出 Kite 主站不会立即撤销已签发的代理会话，可使用“移除域名”立即撤销。禁用配置者或撤销资源权限会拒绝后续请求；公开访问还要求配置者保持管理员身份。已建立的流在移除或超时后结束。

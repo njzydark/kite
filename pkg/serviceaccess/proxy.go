@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -137,7 +138,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, id string) {
 		accessDenied(w, r, http.StatusGone)
 		return
 	}
-	target := Target{Namespace: entry.Namespace, Kind: entry.Kind, Name: entry.Name, Port: entry.Port, Scheme: entry.Scheme}
+	target := entryTarget(entry)
 	owner, err := model.GetUserByIDCached(uint64(entry.UserID))
 	if err != nil || !allowed(*owner, entry.Cluster, target) || (entry.Public && (!isAdmin(*owner) || publicExpired(entry, time.Now()))) {
 		accessDenied(w, r, http.StatusForbidden)
@@ -213,7 +214,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, item *session) 
 	defer stop()
 	defer cancel()
 	r = r.WithContext(ctx)
-	upstream := &url.URL{Scheme: item.Scheme, Host: item.Name + "." + item.Namespace + ".svc.cluster.local:" + strconv.Itoa(item.Port)}
+	upstream := &url.URL{Scheme: item.Scheme, Host: net.JoinHostPort(item.upstreamHost, strconv.Itoa(item.Port))}
 	proxy := &httputil.ReverseProxy{
 		Transport:     item.transport,
 		FlushInterval: -1,

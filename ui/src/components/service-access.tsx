@@ -47,7 +47,7 @@ export function ServiceAccess({
   namespace?: string
   kind: 'services' | 'pods'
   name: string
-  port: number
+  port?: number
   protocol?: string
   legacyHref: string
   children: ReactNode
@@ -56,8 +56,11 @@ export function ServiceAccess({
   const { capabilities, user } = useAuth()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  const [customPort, setCustomPort] = useState('443')
   const [scheme, setScheme] = useState('http')
   const [schemeEdited, setSchemeEdited] = useState(false)
+  const [skipTLSVerify, setSkipTLSVerify] = useState(false)
+  const [tlsEdited, setTLSEdited] = useState(false)
   const [path, setPath] = useState('/')
   const [pathEdited, setPathEdited] = useState(false)
   const [alias, setAlias] = useState('')
@@ -69,6 +72,12 @@ export function ServiceAccess({
   const [error, setError] = useState('')
   const cluster = getCurrentCluster()
   const endpoint = withCurrentClusterPath('/service-access/sessions', cluster)
+  const selectedPort = port ?? Number(customPort)
+  const validPort =
+    (port !== undefined || customPort.trim() !== '') &&
+    Number.isInteger(selectedPort) &&
+    selectedPort >= 1 &&
+    selectedPort <= 65535
   const sessions = useQuery({
     queryKey: serviceAccessQueryKey,
     queryFn: listServiceAccess,
@@ -81,9 +90,14 @@ export function ServiceAccess({
       session.cluster === cluster &&
       session.kind === kind &&
       session.name === name &&
-      session.port === port
+      session.port === selectedPort
   )
-  const selectedScheme = schemeEdited ? scheme : (matching[0]?.scheme ?? scheme)
+  const selectedScheme = schemeEdited
+    ? scheme
+    : (matching[0]?.scheme ?? (selectedPort === 443 ? 'https' : 'http'))
+  const selectedSkipTLSVerify =
+    selectedScheme === 'https' &&
+    (tlsEdited ? skipTLSVerify : (matching[0]?.skipTLSVerify ?? false))
   const selectedPath = pathEdited ? path : (matching[0]?.path ?? path)
   const selectedExpiry = expiryEdited
     ? expiresInMinutes
@@ -103,6 +117,7 @@ export function ServiceAccess({
 
   if (protocol && protocol !== 'TCP')
     return <span className="font-mono">{children}</span>
+  if (!capabilities.serviceAccessEnabled && port === undefined) return null
   if (!capabilities.serviceAccessEnabled)
     return (
       <a
@@ -116,7 +131,7 @@ export function ServiceAccess({
     )
 
   const launch = async () => {
-    if (!namespace || !cluster) return
+    if (!namespace || !cluster || !validPort) return
     const popup = window.open('about:blank', '_blank')
     if (!popup) {
       setError(t('serviceAccess.popupBlocked'))
@@ -130,8 +145,9 @@ export function ServiceAccess({
         namespace,
         kind,
         name,
-        port,
+        port: selectedPort,
         scheme: selectedScheme,
+        skipTLSVerify: selectedSkipTLSVerify,
         path: selectedPath,
         alias,
         expiresInMinutes: Number(selectedExpiry),
@@ -170,6 +186,7 @@ export function ServiceAccess({
         setOpen(next)
         if (!next) {
           setSchemeEdited(false)
+          setTLSEdited(false)
           setPathEdited(false)
           setExpiryEdited(false)
           setPublicEdited(false)
@@ -194,8 +211,27 @@ export function ServiceAccess({
           </DialogDescription>
         </DialogHeader>
         <p className="truncate text-sm font-mono">
-          {namespace}/{name}:{port}
+          {namespace}/{name}
+          {port !== undefined ? `:${port}` : ''}
         </p>
+        {port === undefined && (
+          <div className="space-y-2">
+            <Label htmlFor="service-access-port">
+              {t('serviceAccess.port')}
+            </Label>
+            <Input
+              id="service-access-port"
+              type="number"
+              min={1}
+              max={65535}
+              value={customPort}
+              onChange={(event) => setCustomPort(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('serviceAccess.externalPortHelp')}
+            </p>
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="service-access-alias">
             {t('serviceAccess.alias')}
@@ -204,7 +240,7 @@ export function ServiceAccess({
             id="service-access-alias"
             value={alias}
             onChange={(event) => setAlias(event.target.value.toLowerCase())}
-            placeholder={`${name.replaceAll('.', '-')}-${port}`}
+            placeholder={`${name.replaceAll('.', '-')}-${validPort ? selectedPort : ''}`}
             disabled={matching.length > 0}
           />
           <p className="text-xs text-muted-foreground">
@@ -233,6 +269,26 @@ export function ServiceAccess({
             </SelectContent>
           </Select>
         </div>
+        {selectedScheme === 'https' && (
+          <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+            <div className="space-y-1">
+              <Label htmlFor="service-access-skip-tls">
+                {t('serviceAccess.skipTLSVerify')}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t('serviceAccess.skipTLSVerifyHelp')}
+              </p>
+            </div>
+            <Switch
+              id="service-access-skip-tls"
+              checked={selectedSkipTLSVerify}
+              onCheckedChange={(checked) => {
+                setSkipTLSVerify(checked)
+                setTLSEdited(true)
+              }}
+            />
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="service-access-path">{t('serviceAccess.path')}</Label>
           <Input
@@ -292,6 +348,7 @@ export function ServiceAccess({
         <Button
           disabled={
             busy ||
+            !validPort ||
             sessions.isLoading ||
             sessions.isError ||
             selectedExpiry.trim() === '' ||

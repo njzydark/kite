@@ -11,6 +11,7 @@ type ServiceAccess struct {
 	Name             string     `json:"name" gorm:"size:253;uniqueIndex:idx_service_access_target;not null"`
 	Port             int        `json:"port" gorm:"uniqueIndex:idx_service_access_target;not null"`
 	Scheme           string     `json:"scheme" gorm:"size:5;not null"`
+	SkipTLSVerify    bool       `json:"skipTLSVerify" gorm:"not null;default:false"`
 	Path             string     `json:"path" gorm:"type:text;not null"`
 	ExpiresInMinutes int        `json:"expiresInMinutes" gorm:"not null;default:180"`
 	Public           bool       `json:"public" gorm:"not null;default:false"`
